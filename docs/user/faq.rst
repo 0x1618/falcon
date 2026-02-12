@@ -1372,10 +1372,49 @@ To include multiple values, simply use ``"; "`` to separate each name-value
 pair. For example, if you were to pass ``{'Cookie': 'xxx=yyy; hello=world'}``,
 you would get ``{'cookies': {'xxx': 'yyy', 'hello': 'world'}}``.
 
+How can I set header fields when simulating requests?
+-----------------------------------------------------
+
+Default header fields can be overwritten to simulate unexpected
+behavior. For instance, to test the condition where a ``POST``
+request has an empty body but the value of ``Content-Length``
+is non-zero, we can overwrite that value in the header.
+
+.. code:: python
+
+    import falcon
+    import falcon.testing
+    import pytest
+
+    class PostTest:
+
+        def on_post(self, req, resp):
+            if req.content_length in (None, 0):
+                resp.status = falcon.HTTP_200
+            else:
+                if req.stream.read(req.content_length or 0):
+                    resp.status = falcon.HTTP_201
+                else:
+                    resp.status = falcon.HTTP_400
+
+    @pytest.fixture
+    def client():
+        app = falcon.App()
+        app.add_route('/resource', PostTest())
+
+        return falcon.testing.TestClient(app)
+
+
+    def test_post_empty_body_with_length(client):
+        headers = [('Content-Length', '1'),]
+        body = ''
+        result = client.simulate_post(path='/resource', body=body, headers=headers)
+        assert(result.status == falcon.HTTP_400)
+
 Why do I see no error tracebacks in my ASGI application?
 --------------------------------------------------------
 
-When using Falcon with an ASGI server like Uvicorn,
+When using Falcon with an ASGI server,
 you might notice that server errors do not include any traceback by default.
 This behavior differs from WSGI, where the PEP-3333 specification defines the
 `wsgi.errors <https://peps.python.org/pep-3333/#environ-variables>`__ stream
@@ -1385,8 +1424,17 @@ This behavior differs from WSGI, where the PEP-3333 specification defines the
 Since there is no standardized way to log errors back to the ASGI server,
 the framework simply opts to log them using the ``falcon``
 :class:`logger <logging.Logger>`.
+As a well-behaved library, Falcon does not preconfigure any loggers since that
+might interfere with the user's logging setup.
 
-The easiest way to get started is configuring the root logger via
+Starting with Falcon :doc:`4.3 </changes/4.3.0>`, however, the framework no
+longer adds an instance of :class:`logging.NullHandler` to the ``falcon``
+logger, so error tracebacks may still reach ``sys.stderr`` via the
+:any:`logging.lastResort` handler (but it depends on the existing logging
+configuration of the ASGI server in question).
+
+If you are seeing an HTTP 500 error response without any corresponding
+traceback, the easiest way to get started is configuring the root logger via
 :func:`logging.basicConfig`:
 
 .. code:: python
@@ -1412,4 +1460,4 @@ By adding the above logging configuration, you should now see tracebacks logged
 to :any:`stderr <sys.stderr>` when accessing ``/things``.
 
 For additional details on this topic,
-please refer to :ref:`debugging_asgi_applications`.
+please refer to the ASGI tutorial: :ref:`debugging_asgi_applications`.
